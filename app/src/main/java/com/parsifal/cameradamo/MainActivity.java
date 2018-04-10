@@ -103,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
         texture.setDefaultBufferSize(mPreviewView.getWidth(), mPreviewView.getHeight());
         Surface surface = new Surface(texture);
         try {
-            mPreviewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            mPreviewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -115,7 +115,12 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onConfigured(CameraCaptureSession session) {
             try {
-                //session.capture(mPreviewBuilder.build(), mSessionCaptureCallback, mHandler);
+                // 设置自动对焦模式
+                mPreviewBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                // 设置自动曝光模式
+                mPreviewBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
                 session.setRepeatingRequest(mPreviewBuilder.build(), mSessionCaptureCallback, mHandler);
             } catch (CameraAccessException e) {
                 e.printStackTrace();
