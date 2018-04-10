@@ -1,7 +1,11 @@
 package com.parsifal.cameradamo;
 
 import android.annotation.SuppressLint;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.ImageFormat;
+import android.graphics.Paint;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -19,10 +23,10 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.Size;
-import android.view.Surface;
-import android.view.TextureView;
+import android.view.SurfaceView;
 
 import com.google.gson.Gson;
 
@@ -39,13 +43,21 @@ public class MainActivity extends AppCompatActivity {
 
     private Handler mHandler;
 
-    private TextureView mPreviewView;
+    private SurfaceView mPreviewView;
 
     private CaptureRequest.Builder mPreviewBuilder;
 
     private Size mPreviewSize;
 
     private ImageReader mImageReader;
+
+    private Handler mMainHandler;
+
+    private int mScreenWidth;
+
+    private int mScreenHeight;
+
+    private Bitmap mBitmap;
 
     private CameraDevice.StateCallback mCameraDeviceStateCallback = new CameraDevice.StateCallback() {
         @Override
@@ -73,58 +85,48 @@ public class MainActivity extends AppCompatActivity {
         mThreadHandler = new HandlerThread("CAMERA2");
         mThreadHandler.start();
         mHandler = new Handler(mThreadHandler.getLooper());
+        mMainHandler = new Handler(getMainLooper());
         mPreviewView = findViewById(R.id.previewView);
-        mPreviewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @SuppressLint("MissingPermission")
-            public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                CameraManager cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
-                try {
-                    String[] CameraIdList = cameraManager.getCameraIdList();
-                    String CameraId0 = CameraIdList[0];
-                    //获取可用相机设备列表
-                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(CameraId0);
-                    // 获取摄像头支持的配置属性
-                    StreamConfigurationMap map = characteristics.get(
-                            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    Log.e("getOutputSizes", new Gson().toJson(map.getOutputSizes(ImageFormat.JPEG)));
-                    mPreviewSize = getOptimalSize(map.getOutputSizes(SurfaceTexture.class), width, height);
-                    // TODO: 18-4-10 设置预览尺寸
-                    cameraManager.openCamera(CameraId0, mCameraDeviceStateCallback, mHandler);
-                } catch (CameraAccessException e) {
-                    e.printStackTrace();
-                }
-            }
 
-            @Override
-            public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-            }
+        DisplayMetrics dm = new DisplayMetrics();
+        this.getWindowManager().getDefaultDisplay().getMetrics(dm);
+        mScreenWidth = dm.widthPixels;
+        mScreenHeight = dm.heightPixels;
+    }
 
-            @Override
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
-                return false;
-            }
-
-            @Override
-            public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
-
-            }
-        });
+    @SuppressLint("MissingPermission")
+    @Override
+    protected void onStart() {
+        super.onStart();
+        CameraManager cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
+        try {
+            String[] CameraIdList = cameraManager.getCameraIdList();
+            String CameraId0 = CameraIdList[0];
+            //获取可用相机设备列表
+            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(CameraId0);
+            // 获取摄像头支持的配置属性
+            StreamConfigurationMap map = characteristics.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            Log.e("getOutputSizes", new Gson().toJson(map.getOutputSizes(ImageFormat.JPEG)));
+            mPreviewSize = getOptimalSize(map.getOutputSizes(SurfaceTexture.class), mScreenWidth, mScreenHeight);
+            // TODO: 18-4-10 设置预览尺寸
+            cameraManager.openCamera(CameraId0, mCameraDeviceStateCallback, mHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
     }
 
     private void startPreview(CameraDevice camera) throws CameraAccessException {
         setupPreviewImageReader();
-        SurfaceTexture texture = mPreviewView.getSurfaceTexture();
-        texture.setDefaultBufferSize(mPreviewView.getWidth(), mPreviewView.getHeight());
-        Surface previewSurface = new Surface(texture);
         try {
             mPreviewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
         // 这里一定分别add两个surface，一个Textureview的，一个ImageReader的
-        mPreviewBuilder.addTarget(previewSurface);
+//        mPreviewBuilder.addTarget(previewSurface);
         mPreviewBuilder.addTarget(mImageReader.getSurface());
-        camera.createCaptureSession(Arrays.asList(previewSurface, mImageReader.getSurface()), mSessionStateCallback, mHandler);
+        camera.createCaptureSession(Arrays.asList(mImageReader.getSurface()), mSessionStateCallback, mHandler);
     }
 
     private CameraCaptureSession.StateCallback mSessionStateCallback = new CameraCaptureSession.StateCallback() {
@@ -172,8 +174,25 @@ public class MainActivity extends AppCompatActivity {
             public void onImageAvailable(ImageReader reader) {
                 Image img = reader.acquireNextImage();
                 ByteBuffer buffer = img.getPlanes()[0].getBuffer();
-                byte[] data = new byte[buffer.remaining()];
+                buffer.rewind();
+                byte[] data = new byte[buffer.capacity()];
                 buffer.get(data);
+
+                //从byte数组得到Bitmap
+                mBitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                mBitmap = ImageUtil.zoomBitmap(mBitmap, mPreviewSize.getWidth(),
+                        mPreviewSize.getHeight());
+                //图片旋转 后置旋转90度，前置旋转270度
+                mBitmap = BitmapUtils.rotateBitmap(mBitmap, 90);
+                mMainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        Canvas canvas = mPreviewView.getHolder().lockCanvas();
+                        if (canvas == null) return;
+                        canvas.drawBitmap(mBitmap, 0, 0, new Paint());
+                        mPreviewView.getHolder().unlockCanvasAndPost(canvas);
+                    }
+                });
                 img.close();
             }
         }, mHandler);
