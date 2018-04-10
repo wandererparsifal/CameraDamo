@@ -1,6 +1,7 @@
 package com.parsifal.cameradamo;
 
 import android.annotation.SuppressLint;
+import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -10,13 +11,17 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.view.Surface;
 import android.view.TextureView;
+
+import com.google.gson.Gson;
 
 import java.util.Arrays;
 
@@ -56,19 +61,22 @@ public class MainActivity extends AppCompatActivity {
         mThreadHandler = new HandlerThread("CAMERA2");
         mThreadHandler.start();
         mHandler = new Handler(mThreadHandler.getLooper());
-        mPreviewView = (TextureView) findViewById(R.id.previewView);
+        mPreviewView = findViewById(R.id.previewView);
         mPreviewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @SuppressLint("MissingPermission")
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
                 CameraManager cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
                 try {
                     String[] CameraIdList = cameraManager.getCameraIdList();
+                    String CameraId0 = CameraIdList[0];
                     //获取可用相机设备列表
-                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(CameraIdList[0]);
-                    //在这里可以通过CameraCharacteristics设置相机的功能,当然必须检查是否支持
-                    characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
-                    //就像这样
-                    cameraManager.openCamera(CameraIdList[0], mCameraDeviceStateCallback, mHandler);
+                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(CameraId0);
+                    // 获取摄像头支持的配置属性
+                    StreamConfigurationMap map = characteristics.get(
+                            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                    Log.e("getOutputSizes", new Gson().toJson(map.getOutputSizes(ImageFormat.JPEG)));
+                    // TODO: 18-4-10 设置预览尺寸
+                    cameraManager.openCamera(CameraId0, mCameraDeviceStateCallback, mHandler);
                 } catch (CameraAccessException e) {
                     e.printStackTrace();
                 }
@@ -132,4 +140,10 @@ public class MainActivity extends AppCompatActivity {
                                                 @NonNull CaptureResult partialResult) {
                 }
             };
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
 }
