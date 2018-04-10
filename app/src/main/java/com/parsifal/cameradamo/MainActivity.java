@@ -12,18 +12,26 @@ import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
 
 import com.google.gson.Gson;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -34,6 +42,10 @@ public class MainActivity extends AppCompatActivity {
     private TextureView mPreviewView;
 
     private CaptureRequest.Builder mPreviewBuilder;
+
+    private Size mPreviewSize;
+
+    private ImageReader mImageReader;
 
     private CameraDevice.StateCallback mCameraDeviceStateCallback = new CameraDevice.StateCallback() {
         @Override
@@ -75,6 +87,7 @@ public class MainActivity extends AppCompatActivity {
                     StreamConfigurationMap map = characteristics.get(
                             CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                     Log.e("getOutputSizes", new Gson().toJson(map.getOutputSizes(ImageFormat.JPEG)));
+                    mPreviewSize = getOptimalSize(map.getOutputSizes(SurfaceTexture.class), width, height);
                     // TODO: 18-4-10 设置预览尺寸
                     cameraManager.openCamera(CameraId0, mCameraDeviceStateCallback, mHandler);
                 } catch (CameraAccessException e) {
@@ -99,16 +112,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startPreview(CameraDevice camera) throws CameraAccessException {
+        setupPreviewImageReader();
         SurfaceTexture texture = mPreviewView.getSurfaceTexture();
         texture.setDefaultBufferSize(mPreviewView.getWidth(), mPreviewView.getHeight());
-        Surface surface = new Surface(texture);
+        Surface previewSurface = new Surface(texture);
         try {
             mPreviewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
-        mPreviewBuilder.addTarget(surface);
-        camera.createCaptureSession(Arrays.asList(surface), mSessionStateCallback, mHandler);
+        // 这里一定分别add两个surface，一个Textureview的，一个ImageReader的
+        mPreviewBuilder.addTarget(previewSurface);
+        mPreviewBuilder.addTarget(mImageReader.getSurface());
+        camera.createCaptureSession(Arrays.asList(previewSurface, mImageReader.getSurface()), mSessionStateCallback, mHandler);
     }
 
     private CameraCaptureSession.StateCallback mSessionStateCallback = new CameraCaptureSession.StateCallback() {
@@ -145,6 +161,48 @@ public class MainActivity extends AppCompatActivity {
                                                 @NonNull CaptureResult partialResult) {
                 }
             };
+
+    private void setupPreviewImageReader() {
+        //前三个参数分别是需要的尺寸和格式，最后一个参数代表每次最多获取几帧数据，本例的2代表ImageReader中最多可以获取两帧图像流
+        mImageReader = ImageReader.newInstance(mPreviewSize.getWidth(), mPreviewSize.getHeight(),
+                ImageFormat.JPEG, 2);
+        //监听ImageReader的事件，当有图像流数据可用时会回调onImageAvailable方法，它的参数就是预览帧数据，可以对这帧数据进行处理
+        mImageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
+            @Override
+            public void onImageAvailable(ImageReader reader) {
+                Image img = reader.acquireNextImage();
+                ByteBuffer buffer = img.getPlanes()[0].getBuffer();
+                byte[] data = new byte[buffer.remaining()];
+                buffer.get(data);
+                img.close();
+            }
+        }, mHandler);
+    }
+
+    //选择sizeMap中大于并且最接近width和height的size
+    private Size getOptimalSize(Size[] sizeMap, int width, int height) {
+        List<Size> sizeList = new ArrayList<>();
+        for (Size option : sizeMap) {
+            if (width > height) {
+                if (option.getWidth() > width && option.getHeight() > height) {
+                    sizeList.add(option);
+                }
+            } else {
+                if (option.getWidth() > height && option.getHeight() > width) {
+                    sizeList.add(option);
+                }
+            }
+        }
+        if (sizeList.size() > 0) {
+            return Collections.min(sizeList, new Comparator<Size>() {
+                @Override
+                public int compare(Size lhs, Size rhs) {
+                    return Long.signum(lhs.getWidth() * lhs.getHeight() - rhs.getWidth() * rhs.getHeight());
+                }
+            });
+        }
+        return sizeMap[0];
+    }
 
     @Override
     protected void onStop() {
